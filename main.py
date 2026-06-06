@@ -1,40 +1,70 @@
-"""Entry point for the 2D roguelite survivor game.
+"""Entry point — stationary turret survivor with DP / Equipment.
 
-Handles Pygame initialisation and the top-level state machine.
+Player stays in the centre of the screen and auto-attacks.
+Level-ups give automatic stat boosts (no 3-choice screen).
 """
 
 import math
+import random
 
 import pygame
 
 import config
-from entities import Player, Enemy, Bullet, XPPickup
-from systems import WaveManager, UpgradeManager
-from ui import draw_upgrade_screen
+import i18n
+import save_manager
+from entities import Player, Enemy, Bullet, EquipmentItem
+from systems import (WaveManager,
+                     calculate_divine_power,
+                     apply_permanent_bonuses,
+                     generate_equipment, should_drop_equipment)
+from ui import (draw_menu, draw_hud,
+                draw_divine_power_screen, draw_equipment_screen,
+                draw_game_over)
 
 
 def run_game():
-    """Initialise Pygame and run the main game loop."""
     pygame.init()
     screen = pygame.display.set_mode((config.SCREEN_WIDTH,
                                       config.SCREEN_HEIGHT))
     pygame.display.set_caption("Survivor's Legacy")
     clock = pygame.time.Clock()
-    font = pygame.font.Font(None, 28)
+    font = i18n.L.create_font(28)
+    font_lg = i18n.L.create_font(42)
 
     # ── State machine ────────────────────────────────────────────────────
-    MENU, PLAYING, UPGRADE, GAME_OVER = "MENU", "PLAYING", "UPGRADE", "GAME_OVER"
+    (MENU, PLAYING, GAME_OVER,
+     DIVINE_POWER, EQUIPMENT) = range(5)
     state = MENU
 
+    # ── Persistent save ─────────────────────────────────────────────────
+    save_data = save_manager.load_data()
+    i18n.L.LANG = save_data.get("lang", "en")
+
+    # ── Per-run state ───────────────────────────────────────────────────
     player = Player()
     enemies: list[Enemy] = []
     bullets: list[Bullet] = []
-    pickups: list[XPPickup] = []
+    enemy_bullets: list[Bullet] = []
     wave_manager = WaveManager()
-    upgrade_manager = UpgradeManager()
-    pending_upgrades: list[dict] = []
     kills = 0
-    score = 0
+    dp_earned_this_run = 0
+    max_level_reached = 1
+    equip_notification = ""
+    notif_timer = 0.0
+    level_up_timer = 0.0
+
+    # Divine Power screen state
+    dp_selected_index = 0
+    dp_notification = ""
+    dp_scroll_offset = 0
+
+    # Speed system
+    SPEED_TIERS = [1.0, 1.5, 2.0, 3.0, 4.0, 5.0]
+    time_scale = 1.0
+    speed_idx = 0
+
+    # Clickable button rects (filled each frame's draw pass)
+    click_buttons: dict[str, pygame.Rect] = {}
 
     running = True
     while running:
@@ -45,261 +75,427 @@ def run_game():
             if event.type == pygame.QUIT:
                 running = False
 
-            if state == MENU and event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_RETURN:
-                    state = PLAYING
+            # ── MOUSE ─────────────────────────────────────────────────────
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                for action, rect in click_buttons.items():
+                    if not rect.collidepoint(event.pos):
+                        continue
 
-            if state == GAME_OVER and event.type == pygame.KEYDOWN:
-                if event.key == pygame.K_RETURN:
-                    player = Player()
-                    enemies.clear()
-                    bullets.clear()
-                    pickups.clear()
-                    wave_manager = WaveManager()
-                    upgrade_manager = UpgradeManager()
-                    pending_upgrades.clear()
-                    kills = 0
-                    score = 0
+                    # MENU actions
+                    if state == MENU and action == "start":
+                        (kills, dp_earned_this_run, max_level_reached,
+                         equip_notification, notif_timer,
+                         level_up_timer, time_scale,
+                         speed_idx) = _start_new_run(
+                             player, enemies, bullets, enemy_bullets,
+                             wave_manager, save_data)
+                        state = PLAYING
+                    elif state == MENU and action == "dp":
+                        state = DIVINE_POWER
+                        dp_selected_index = 0
+                        dp_scroll_offset = 0
+                        dp_notification = ""
+                    elif state == MENU and action == "equip":
+                        state = EQUIPMENT
+                    elif state == MENU and action == "lang":
+                        _toggle_lang(save_data)
+                    elif state == MENU and action == "clear_data":
+                        _clear_save_data(save_data)
+                    elif state == MENU and action == "exit_game":
+                        running = False
+
+                    # GAME OVER
+                    elif state == GAME_OVER and action == "continue":
+                        save_manager.add_divine_power(dp_earned_this_run)
+                        save_data = save_manager.load_data()
+                        (kills, dp_earned_this_run, max_level_reached,
+                         equip_notification, notif_timer,
+                         level_up_timer, time_scale,
+                         speed_idx) = _reset_run_state()
+                        state = MENU
+
+                    # PLAYING → settlement (awards DP like death)
+                    elif state == PLAYING and action == "exit":
+                        dp_earned_this_run = calculate_divine_power(
+                            max_level_reached, kills,
+                            wave_manager.wave_number,
+                            player.dp_bonus)
+                        state = GAME_OVER
+                    elif state == PLAYING and action == "speed":
+                        max_i = min(player.game_speed,
+                                    len(SPEED_TIERS) - 1)
+                        speed_idx = (speed_idx + 1) % (max_i + 1)
+                        time_scale = SPEED_TIERS[speed_idx]
+
+                    # EQUIPMENT
+                    elif state == EQUIPMENT and action == "back":
+                        save_data = save_manager.load_data()
+                        state = MENU
+
+                    # DIVINE POWER
+                    elif state == DIVINE_POWER and action == "back":
+                        save_data = save_manager.load_data()
+                        state = MENU
+                    elif state == DIVINE_POWER and action == "buy":
+                        dp_notification = _buy_dp_perk(save_data,
+                                                       dp_selected_index)
+                    elif state == DIVINE_POWER and action == "scroll_up":
+                        dp_scroll_offset = max(0, dp_scroll_offset - 1)
+                    elif state == DIVINE_POWER and action == "scroll_down":
+                        max_off = max(0, len(config.DIVINE_PERKS)
+                                      - config.DP_VISIBLE_ROWS)
+                        dp_scroll_offset = min(max_off, dp_scroll_offset + 1)
+                    elif state == DIVINE_POWER:
+                        # Clicked a perk row → select it
+                        for perk in config.DIVINE_PERKS:
+                            if perk["key"] == action:
+                                dp_selected_index = config.DIVINE_PERKS.index(perk)
+                                break
+
+            # ── MOUSE WHEEL (Divine Power scroll) ──────────────────────
+            if (event.type == pygame.MOUSEBUTTONDOWN
+                    and state == DIVINE_POWER):
+                max_off = max(0, len(config.DIVINE_PERKS)
+                              - config.DP_VISIBLE_ROWS)
+                if event.button == 4:  # scroll up
+                    dp_scroll_offset = max(0, dp_scroll_offset - 1)
+                elif event.button == 5:  # scroll down
+                    dp_scroll_offset = min(max_off, dp_scroll_offset + 1)
+
+            # ── KEYS ─────────────────────────────────────────────────────
+            if event.type == pygame.KEYDOWN:
+                # MENU
+                if state == MENU:
+                    if event.key == pygame.K_RETURN:
+                        (kills, dp_earned_this_run, max_level_reached,
+                         equip_notification, notif_timer,
+                         level_up_timer, time_scale,
+                         speed_idx) = _start_new_run(
+                             player, enemies, bullets, enemy_bullets,
+                             wave_manager, save_data)
+                        state = PLAYING
+                    elif event.key == pygame.K_d:
+                        state = DIVINE_POWER
+                        dp_selected_index = 0
+                        dp_scroll_offset = 0
+                        dp_notification = ""
+                    elif event.key == pygame.K_e:
+                        state = EQUIPMENT
+                    elif event.key == pygame.K_l:
+                        _toggle_lang(save_data)
+
+                # GAME OVER
+                elif state == GAME_OVER and event.key == pygame.K_RETURN:
+                    save_manager.add_divine_power(dp_earned_this_run)
+                    save_data = save_manager.load_data()
+                    (kills, dp_earned_this_run, max_level_reached,
+                     equip_notification, notif_timer,
+                     level_up_timer, time_scale,
+                     speed_idx) = _reset_run_state()
                     state = MENU
 
-            if state == UPGRADE and event.type == pygame.KEYDOWN:
-                index = None
-                if event.key == pygame.K_1:
-                    index = 0
-                elif event.key == pygame.K_2:
-                    index = 1
-                elif event.key == pygame.K_3:
-                    index = 2
+                # DIVINE POWER
+                elif state == DIVINE_POWER:
+                    if event.key == pygame.K_UP:
+                        dp_selected_index = max(0, dp_selected_index - 1)
+                    elif event.key == pygame.K_DOWN:
+                        dp_selected_index = min(
+                            len(config.DIVINE_PERKS) - 1,
+                            dp_selected_index + 1)
+                    # Keep selected perk visible
+                    if dp_selected_index < dp_scroll_offset:
+                        dp_scroll_offset = dp_selected_index
+                    if dp_selected_index >= (dp_scroll_offset
+                                             + config.DP_VISIBLE_ROWS):
+                        dp_scroll_offset = (dp_selected_index
+                                            - config.DP_VISIBLE_ROWS + 1)
+                    elif event.key == pygame.K_RETURN:
+                        dp_notification = _buy_dp_perk(save_data,
+                                                       dp_selected_index)
+                    elif event.key == pygame.K_ESCAPE:
+                        save_data = save_manager.load_data()
+                        state = MENU
 
-                if index is not None and index < len(pending_upgrades):
-                    upgrade_manager.apply_upgrade(player,
-                                                  pending_upgrades[index])
-                    pending_upgrades.clear()
-                    state = PLAYING
+                # PLAYING
+                elif state == PLAYING:
+                    if event.key == pygame.K_m:
+                        dp_earned_this_run = calculate_divine_power(
+                            max_level_reached, kills,
+                            wave_manager.wave_number,
+                            player.dp_bonus)
+                        state = GAME_OVER
+                    elif event.key == pygame.K_TAB:
+                        max_i = min(player.game_speed,
+                                    len(SPEED_TIERS) - 1)
+                        speed_idx = (speed_idx + 1) % (max_i + 1)
+                        time_scale = SPEED_TIERS[speed_idx]
 
-        # ── Update ─────────────────────────────────────────────────────
+                # EQUIPMENT
+                elif state == EQUIPMENT and event.key == pygame.K_ESCAPE:
+                    state = MENU
+
+        # ── Update (PLAYING only) ──────────────────────────────────────
         if state == PLAYING:
-            # --- Player movement ---
-            keys = pygame.key.get_pressed()
-            dx = dy = 0.0
-            if keys[pygame.K_w] or keys[pygame.K_UP]:
-                dy -= player.speed * dt
-            if keys[pygame.K_s] or keys[pygame.K_DOWN]:
-                dy += player.speed * dt
-            if keys[pygame.K_a] or keys[pygame.K_LEFT]:
-                dx -= player.speed * dt
-            if keys[pygame.K_d] or keys[pygame.K_RIGHT]:
-                dx += player.speed * dt
+            game_dt = dt * time_scale
 
-            if dx != 0 and dy != 0:
-                normal = (player.speed * dt) / (abs(dx) + abs(dy))
-                dx *= normal
-                dy *= normal
+            # Clamp speed_idx to available tiers
+            if hasattr(player, "game_speed"):
+                max_i = min(player.game_speed, len(SPEED_TIERS) - 1)
+                speed_idx = min(speed_idx, max_i)
+                time_scale = SPEED_TIERS[speed_idx]
 
-            player.move(dx, dy)
-
-            # --- Auto-attack: fire at nearest enemy in range ---
-            player.attack_timer -= dt
+            # Auto-attack
+            player.attack_timer -= game_dt
             if player.attack_timer <= 0:
                 target = player.get_nearest_enemy(enemies)
                 if target is not None:
-                    _fire_bullets(player, target, bullets)
+                    _fire_bullet(player, target, bullets)
                     player.attack_timer = player.attack_cooldown
 
-            # --- Update bullets ---
+            # Update bullets
             for bullet in bullets[:]:
-                bullet.update(dt)
+                bullet.update(game_dt)
                 if not bullet.is_alive() or bullet.is_off_screen():
                     bullets.remove(bullet)
 
-            # --- Enemy wave spawning ---
-            wave_manager.update(dt, enemies)
+                    # HP regeneration
+            if player.hp_regen > 0 and player.hp < player.max_hp:
+                player.hp = min(player.max_hp,
+                                player.hp + player.hp_regen * game_dt)
 
-            # --- Update enemies & contact damage ---
+            # Enemy wave spawning
+            wave_manager.update(game_dt, enemies)
+
+            # Update enemies & contact damage
             for enemy in enemies[:]:
-                enemy.move_towards(player.rect.center, dt)
+                enemy.move_towards(player.rect.center, game_dt)
                 if player.rect.colliderect(enemy.rect):
-                    player.take_damage(enemy.damage * dt)
+                    player.take_damage(enemy.damage * game_dt)
 
-            # --- Bullet ↔ enemy collisions ---
+                # Enemy shoots at player
+                enemy.attack_timer -= game_dt
+                if enemy.attack_timer <= 0:
+                    dx = player.rect.centerx - enemy.rect.centerx
+                    dy = player.rect.centery - enemy.rect.centery
+                    if math.hypot(dx, dy) < enemy.attack_range:
+                        eb = Bullet(enemy.rect.centerx, enemy.rect.centery,
+                                    player.rect.centerx, player.rect.centery,
+                                    enemy.damage, owner="enemy")
+                        enemy_bullets.append(eb)
+                        enemy.attack_timer = enemy.attack_cooldown
+
+            # Bullet ↔ enemy collisions (swept rect to prevent tunneling)
             for bullet in bullets[:]:
-                hit_index = bullet.rect.collidelist(enemies)
-                if hit_index != -1:
-                    enemy = enemies[hit_index]
+                swept = bullet.rect.inflate(abs(bullet.vx * game_dt),
+                                            abs(bullet.vy * game_dt))
+                hit = swept.collidelist(enemies)
+                if hit != -1:
+                    enemy = enemies[hit]
                     died = enemy.take_damage(bullet.damage)
+                    # Lifesteal
+                    if player.lifesteal > 0:
+                        heal = bullet.damage * player.lifesteal
+                        player.hp = min(player.max_hp,
+                                        player.hp + heal)
                     if died:
-                        pickups.append(
-                            XPPickup(enemy.rect.centerx, enemy.rect.centery,
-                                     enemy.xp_value)
-                        )
                         enemies.remove(enemy)
                         kills += 1
                         wave_manager.on_enemy_killed()
-                        score += enemy.xp_value * 10
+                        # XP goes directly to player
+                        levelled = player.gain_xp(enemy.xp_value)
+                        max_level_reached = max(max_level_reached,
+                                                player.level)
+                        if levelled:
+                            player.on_level_up()
+                            level_up_timer = 1.5
 
-                    # Piercing: keep flying if charges remain
+                        if should_drop_equipment(wave_manager.wave_number):
+                            msg = _try_equip_drop(save_data, wave_manager)
+                            if msg:
+                                equip_notification = msg
+                                notif_timer = 3.0
+
                     if bullet.piercing > 0:
+                        retention = min(0.95, config.PENETRATION_RATE
+                                        + player.piercing * 0.02)
+                        bullet.damage *= retention
                         bullet.piercing -= 1
                     else:
                         bullets.remove(bullet)
 
-            # --- Player ↔ pickup collisions ---
-            for pickup in pickups[:]:
-                pickup.update(dt)
-                if not pickup.is_alive():
-                    pickups.remove(pickup)
-                    continue
-                if player.rect.colliderect(pickup.rect):
-                    levelled = player.gain_xp(pickup.value)
-                    pickups.remove(pickup)
-                    if levelled:
-                        pending_upgrades = upgrade_manager.pick_upgrades(3)
-                        state = UPGRADE
+            # Enemy bullets update & collision with player
+            for bullet in enemy_bullets[:]:
+                bullet.update(game_dt)
+                if (not bullet.is_alive()
+                        or bullet.is_off_screen()
+                        or bullet.rect.colliderect(player.rect)):
+                    enemy_bullets.remove(bullet)
+                    if bullet.rect.colliderect(player.rect):
+                        player.take_damage(bullet.damage)
 
-            # --- Player death ---
+            # Timers
+            if notif_timer > 0:
+                notif_timer -= dt
+            if level_up_timer > 0:
+                level_up_timer -= dt
+
+            # Player death
             if player.hp <= 0:
+                dp_earned_this_run = calculate_divine_power(
+                    max_level_reached, kills, wave_manager.wave_number)
                 state = GAME_OVER
 
         # ── Draw ────────────────────────────────────────────────────────
         screen.fill(config.DARK_GREY)
 
         if state == MENU:
-            _draw_menu(screen, font)
+            click_buttons = draw_menu(screen, font, save_data)
+
         elif state == PLAYING:
-            for pickup in pickups:
-                pickup.draw(screen)
             for bullet in bullets:
+                bullet.draw(screen)
+            for bullet in enemy_bullets:
                 bullet.draw(screen)
             for enemy in enemies:
                 enemy.draw(screen)
             player.draw(screen)
-            _draw_hud(screen, font, player, wave_manager, kills)
-        elif state == UPGRADE:
-            # Draw the frozen game scene underneath
-            for pickup in pickups:
-                pickup.draw(screen)
-            for bullet in bullets:
-                bullet.draw(screen)
-            for enemy in enemies:
-                enemy.draw(screen)
-            player.draw(screen)
-            _draw_hud(screen, font, player, wave_manager, kills)
-            # Overlay upgrade selection on top
-            draw_upgrade_screen(screen, pending_upgrades, player)
+            click_buttons = draw_hud(screen, font, player, wave_manager,
+                                     kills, equip_notification,
+                                     notif_timer, level_up_timer,
+                                     time_scale)
+
         elif state == GAME_OVER:
-            _draw_game_over(screen, font, score, wave_manager)
+            click_buttons = draw_game_over(screen, font,
+                                           wave_manager, dp_earned_this_run)
+
+        elif state == DIVINE_POWER:
+            click_buttons = draw_divine_power_screen(
+                screen, font, font_lg, save_data, dp_selected_index,
+                dp_notification, dp_scroll_offset)
+
+        elif state == EQUIPMENT:
+            click_buttons = draw_equipment_screen(screen, font, font_lg,
+                                                  save_data)
 
         pygame.display.flip()
 
     pygame.quit()
 
 
-# ── Helper: fire bullet(s) ──────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════
+#  Helper functions
+# ═════════════════════════════════════════════════════════════════════════
 
-_TRIPLE_SPREAD = math.radians(12)  # ±12 degrees
+def _start_new_run(player, enemies, bullets, enemy_bullets,
+                   wave_manager, save_data):
+    """Reset per-run state and apply permanent bonuses.
+
+    Returns tuple of initial (kills, dp_earned_this_run,
+    max_level_reached, equip_notification, notif_timer, level_up_timer,
+    time_scale, speed_idx).
+    """
+    player.__init__()
+    apply_permanent_bonuses(player, save_data)
+    enemies.clear()
+    bullets.clear()
+    enemy_bullets.clear()
+    wave_manager.__init__()
+    return (0, 0, 1, "", 0.0, 0.0, 1.0, 0)
 
 
-def _fire_bullets(player, target: Enemy, bullet_list: list):
-    """Create one (or three, if triple-shot) bullets toward *target*."""
+def _reset_run_state():
+    """Return clean initial values for per-run tracking variables."""
+    return (0, 0, 1, "", 0.0, 0.0, 1.0, 0)
+
+
+def _buy_dp_perk(save_data: dict, selected_index: int) -> str:
+    """Purchase the selected perk if affordable.  Returns notification text."""
+    perks = config.DIVINE_PERKS
+    if selected_index < 0 or selected_index >= len(perks):
+        return ""
+    perk = perks[selected_index]
+    key = perk["key"]
+    level = save_data.get("perk_levels", {}).get(key, 0)
+    if level >= perk["max"]:
+        return i18n.L.t("dp_maxed")
+    cost = config.perk_cost(level)
+    if save_data["dp"] < cost:
+        return i18n.L.t("dp_nofunds")
+    save_data["dp"] -= cost
+    save_data["perk_levels"][key] = level + 1
+    save_manager.save_data(save_data)
+    return i18n.L.t("dp_bought", i18n.L.perk_name(key), level + 1)
+
+
+def _toggle_lang(save_data: dict):
+    """Switch language between en/zh and persist."""
+    i18n.L.LANG = "zh" if i18n.L.LANG == "en" else "en"
+    save_data["lang"] = i18n.L.LANG
+    save_manager.save_data(save_data)
+
+
+def _clear_save_data(save_data: dict):
+    """Reset all save data to defaults (DP, perks, equipment)."""
+    lang = save_data.get("lang", "en")
+    save_data.clear()
+    save_data["lang"] = lang
+    save_data["dp"] = 0
+    save_data["total_dp_earned"] = 0
+    save_data["perk_levels"] = {p["key"]: 0 for p in config.DIVINE_PERKS}
+    save_data["equipped"] = {}
+    save_manager.save_data(save_data)
+
+
+def _fire_bullet(player, target: Enemy, bullet_list: list):
+    """Fire bullet_count bullets in a spread toward *target*."""
     px, py = player.rect.center
     tx, ty = target.rect.center
-
-    # Base angle toward target
-    angle = math.atan2(ty - py, tx - px)
-
-    if player.triple_shot:
-        # Fire three bullets in a spread
-        offsets = (-_TRIPLE_SPREAD, 0, _TRIPLE_SPREAD)
-        for off in offsets:
-            a = angle + off
-            bx = px + math.cos(a) * 20  # spawn slightly ahead
-            by = py + math.sin(a) * 20
-            # Calculate target point along this angle
-            aim_x = px + math.cos(a) * 1000
-            aim_y = py + math.sin(a) * 1000
-            bullet = Bullet(bx, by, aim_x, aim_y, player.attack_damage,
-                            piercing=player.piercing)
-            bullet_list.append(bullet)
-    else:
-        bullet = Bullet(px, py, tx, ty, player.attack_damage,
-                        piercing=player.piercing)
+    is_crit = random.random() < player.crit_rate
+    dmg = player.attack_damage * (player.crit_damage if is_crit else 1.0)
+    count = max(1, player.bullet_count)
+    base_angle = math.atan2(ty - py, tx - px)
+    step = 0.12
+    for i in range(count):
+        if i == 0:
+            offset = 0.0
+        elif i % 2 == 1:
+            offset = -step * ((i + 1) // 2)
+        else:
+            offset = step * (i // 2)
+        angle = base_angle + offset
+        spread_tx = px + math.cos(angle) * 100
+        spread_ty = py + math.sin(angle) * 100
+        bullet = Bullet(px, py, spread_tx, spread_ty, dmg,
+                        piercing=player.piercing, is_critical=is_crit)
         bullet_list.append(bullet)
 
 
-# ═════════════════════════════════════════════════════════════════════════
-#  Drawing helpers
-# ═════════════════════════════════════════════════════════════════════════
+def _try_equip_drop(save_data: dict, wave_manager) -> str:
+    """Generate and auto-equip a better item.  Returns notification str."""
+    item = generate_equipment(wave_manager.wave_number)
+    slot = item.slot
+    rarity = item.rarity
+    tier_map = {r: i for i, r in enumerate(config.EQUIP_RARITIES)}
+    new_tier = tier_map.get(rarity, 0)
 
-def _draw_menu(screen: pygame.Surface, font: pygame.font.Font):
-    """Render the main menu screen."""
-    title = font.render("Survivor's Legacy", True, config.WHITE)
-    prompt = font.render("Press ENTER to play", True, config.WHITE)
-    screen.blit(title,
-                (config.SCREEN_WIDTH // 2 - title.get_width() // 2, 200))
-    screen.blit(prompt,
-                (config.SCREEN_WIDTH // 2 - prompt.get_width() // 2, 300))
+    current = save_data["equipped"].get(slot)
+    replace = False
+    if current is None:
+        replace = True
+    else:
+        try:
+            cur_item = EquipmentItem.from_dict(current)
+            replace = new_tier > tier_map.get(cur_item.rarity, 0)
+        except (KeyError, TypeError, ValueError):
+            replace = True
 
-
-def _draw_hud(screen: pygame.Surface, font: pygame.font.Font,
-              player: Player, wave_manager: WaveManager, kills: int):
-    """Render the in-game heads-up display with bars and stats."""
-    bar_width, bar_height = 200, 16
-    bar_x, bar_y = 12, 12
-
-    # HP bar
-    hp_ratio = player.hp / player.max_hp
-    pygame.draw.rect(screen, config.GREY,
-                     (bar_x, bar_y, bar_width, bar_height))
-    fill_w = int(bar_width * hp_ratio)
-    colour = config.HP_BAR_GREEN if hp_ratio > 0.3 else config.HP_BAR_RED
-    if fill_w > 0:
-        pygame.draw.rect(screen, colour,
-                         (bar_x, bar_y, fill_w, bar_height))
-    hp_label = font.render(f"HP {player.hp}/{player.max_hp}", True,
-                           config.WHITE)
-    screen.blit(hp_label, (bar_x, bar_y - 2))
-
-    # XP bar (below HP)
-    xp_y = bar_y + bar_height + 6
-    needed = Player._xp_for_level(player.level)
-    xp_ratio = player.xp / needed if needed > 0 else 0
-    pygame.draw.rect(screen, config.GREY,
-                     (bar_x, xp_y, bar_width, bar_height))
-    if xp_ratio > 0:
-        pygame.draw.rect(screen, config.XP_BAR_BLUE,
-                         (bar_x, xp_y, int(bar_width * xp_ratio), bar_height))
-    xp_label = font.render(f"Lv.{player.level}  XP {player.xp}/{needed}",
-                           True, config.WHITE)
-    screen.blit(xp_label, (bar_x, xp_y - 2))
-
-    # Right-side stats
-    stats_y = 12
-    wave_text = font.render(f"Wave {wave_manager.wave_number}", True,
-                            config.WHITE)
-    kills_text = font.render(f"Kills: {kills}", True, config.WHITE)
-    screen.blit(wave_text,
-                (config.SCREEN_WIDTH - wave_text.get_width() - 12, stats_y))
-    screen.blit(kills_text,
-                (config.SCREEN_WIDTH - kills_text.get_width() - 12,
-                 stats_y + 24))
-
-
-def _draw_game_over(screen: pygame.Surface, font: pygame.font.Font,
-                    score: int, wave_manager: WaveManager):
-    """Render the game-over screen with final stats."""
-    lines = [
-        ("GAME OVER", config.RED),
-        (f"Score: {score}", config.WHITE),
-        (f"Wave reached: {wave_manager.wave_number}", config.WHITE),
-        (f"Enemies killed: {wave_manager.enemies_killed}", config.WHITE),
-        ("Press ENTER to return to menu", config.GREY),
-    ]
-    y = 220
-    for text, colour in lines:
-        rendered = font.render(text, True, colour)
-        screen.blit(rendered,
-                    (config.SCREEN_WIDTH // 2 - rendered.get_width() // 2, y))
-        y += 36
+    if replace:
+        save_data["equipped"][slot] = item.to_dict()
+        save_manager.save_data(save_data)
+        return i18n.L.t("equip_drop",
+                        i18n.L.rarity_name(rarity).upper(),
+                        i18n.L.slot_name(slot))
+    return ""
 
 
 if __name__ == "__main__":
