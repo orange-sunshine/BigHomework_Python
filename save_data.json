@@ -1,114 +1,21 @@
 {
   "lang": "zh",
-  "dp": 234,
-  "total_dp_earned": 12134,
+  "dp": 0,
+  "total_dp_earned": 0,
   "perk_levels": {
-    "xp_modifier": 19,
-    "attack_damage": 14,
-    "max_hp": 4,
-    "crit_rate": 1,
-    "crit_damage": 1,
-    "attack_cooldown": 2,
-    "piercing": 15,
-    "game_speed": 5,
-    "bullet_count": 50,
-    "defense": 2,
-    "dp_bonus": 58,
-    "hp_regen": 3
+    "gold_modifier": 0,
+    "attack_damage": 0,
+    "max_hp": 0,
+    "defense": 0,
+    "lifesteal": 0,
+    "hp_regen": 0,
+    "bullet_count": 0,
+    "crit_rate": 0,
+    "crit_damage": 0,
+    "attack_cooldown": 0,
+    "piercing": 0,
+    "game_speed": 0,
+    "dp_bonus": 0
   },
-  "equipped": {
-    "weapon": {
-      "slot": "weapon",
-      "rarity": "red",
-      "affixes": [
-        {
-          "name": "Range",
-          "attr": "attack_range",
-          "value": 200
-        },
-        {
-          "name": "Regen",
-          "attr": "hp_regen",
-          "value": 7
-        },
-        {
-          "name": "HP",
-          "attr": "max_hp",
-          "value": 150
-        },
-        {
-          "name": "CritRt",
-          "attr": "crit_rate",
-          "value": 0.2
-        },
-        {
-          "name": "Atk",
-          "attr": "attack_damage",
-          "value": 35
-        }
-      ]
-    },
-    "armor": {
-      "slot": "armor",
-      "rarity": "red",
-      "affixes": [
-        {
-          "name": "CritRt",
-          "attr": "crit_rate",
-          "value": 0.2
-        },
-        {
-          "name": "Range",
-          "attr": "attack_range",
-          "value": 200
-        },
-        {
-          "name": "XP",
-          "attr": "xp_modifier",
-          "value": 0.5
-        },
-        {
-          "name": "CritDmg",
-          "attr": "crit_damage",
-          "value": 0.5
-        },
-        {
-          "name": "Atk",
-          "attr": "attack_damage",
-          "value": 35
-        }
-      ]
-    },
-    "accessory": {
-      "slot": "accessory",
-      "rarity": "red",
-      "affixes": [
-        {
-          "name": "Range",
-          "attr": "attack_range",
-          "value": 200
-        },
-        {
-          "name": "HP",
-          "attr": "max_hp",
-          "value": 150
-        },
-        {
-          "name": "XP",
-          "attr": "xp_modifier",
-          "value": 0.5
-        },
-        {
-          "name": "Def",
-          "attr": "defense",
-          "value": 22
-        },
-        {
-          "name": "LS",
-          "attr": "lifesteal",
-          "value": 0.1
-        }
-      ]
-    }
-  }
+  "equipped": {}
 }

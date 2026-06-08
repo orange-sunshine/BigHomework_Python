@@ -12,7 +12,6 @@ class Player:
     """Stationary turret-style player.
 
     Stays in the centre of the screen, auto-attacks the nearest enemy.
-    Levels up grant automatic stat increases.
     """
 
     def __init__(self):
@@ -23,8 +22,6 @@ class Player:
 
         self.hp = config.PLAYER_START_HP
         self.max_hp = config.PLAYER_MAX_HP
-        self.xp = config.PLAYER_START_XP
-        self.level = config.PLAYER_START_LEVEL
         self.attack_cooldown = config.PLAYER_ATTACK_COOLDOWN
         self.attack_damage = config.PLAYER_ATTACK_DAMAGE
         self.attack_range = config.PLAYER_ATTACK_RANGE
@@ -34,7 +31,7 @@ class Player:
         self.crit_rate = config.BASE_CRIT_RATE
         self.crit_damage = config.BASE_CRIT_DAMAGE
         self.penetration_rate = config.PENETRATION_RATE
-        self.xp_modifier = 1.0
+        self.gold_modifier = 1.0
         self.game_speed = 0
         self.defense = config.PLAYER_DEFENSE
         self.lifesteal = config.PLAYER_LIFESTEAL
@@ -42,32 +39,10 @@ class Player:
         self.bullet_count = config.PLAYER_BULLET_COUNT
         self.dp_bonus = 0
 
-    def on_level_up(self):
-        """Auto-increase stats when the player gains a level."""
-        self.max_hp += config.LEVEL_UP_HP_BONUS
-        self.hp += config.LEVEL_UP_HP_BONUS
-        self.attack_damage += config.LEVEL_UP_DMG_BONUS
-        self.defense += config.LEVEL_UP_DEF_BONUS
-
     def take_damage(self, amount: float):
         """Reduce HP by *amount* (mitigated by defense), flooring at zero."""
         effective = max(0, amount - self.defense)
         self.hp = max(0, self.hp - effective)
-
-    def gain_xp(self, raw_amount: float):
-        """Add XP (modified by xp_modifier) and return True if levelled."""
-        self.xp += raw_amount * self.xp_modifier
-        needed = self._xp_for_level(self.level)
-        if self.xp >= needed:
-            self.xp -= needed
-            self.level += 1
-            return True
-        return False
-
-    @staticmethod
-    def _xp_for_level(level: int) -> int:
-        return int(config.XP_BASE_REQUIREMENT *
-                   (config.XP_SCALE_FACTOR ** (level - 1)))
 
     def get_nearest_enemy(self, enemies: list):
         """Return the closest enemy within attack_range, or None."""
@@ -99,7 +74,7 @@ class Enemy:
         self.hp = config.ENEMY_BASE_HP
         self.speed = config.ENEMY_BASE_SPEED
         self.damage = config.ENEMY_BASE_DAMAGE
-        self.xp_value = config.ENEMY_BASE_XP_VALUE
+        self.gold_value = 0
         self.attack_range = config.ENEMY_ATTACK_RANGE
         self.attack_cooldown = 2.0
         self.attack_timer = random.uniform(0, self.attack_cooldown)
@@ -183,33 +158,6 @@ class Bullet:
         else:
             colour = config.WHITE if self.is_critical else config.YELLOW
         pygame.draw.rect(surface, colour, self.rect)
-
-
-class XPPickup:
-    """Experience orb dropped by dead enemies."""
-
-    def __init__(self, x: float, y: float, value: int):
-        """Create an XP pickup at (x, y) worth *value* XP."""
-        size = config.PICKUP_SIZE
-        self.rect = pygame.Rect(0, 0, size, size)
-        self.rect.center = (x, y)
-        self.value = value
-        self.lifetime = config.PICKUP_LIFETIME
-
-    def update(self, dt: float):
-        """Reduce lifetime each frame."""
-        self.lifetime -= dt
-
-    def is_alive(self) -> bool:
-        """Return True while lifetime remains."""
-        return self.lifetime > 0
-
-    def draw(self, surface: pygame.Surface):
-        cx, cy = self.rect.center
-        half = config.PICKUP_SIZE // 2
-        points = [(cx, cy - half), (cx + half, cy),
-                  (cx, cy + half), (cx - half, cy)]
-        pygame.draw.polygon(surface, config.GREEN, points)
 
 
 # ═════════════════════════════════════════════════════════════════════════

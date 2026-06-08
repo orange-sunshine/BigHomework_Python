@@ -9,8 +9,7 @@ import config
 from entities import EquipmentItem
 from i18n import L
 
-# Cached large font for level-up flash (created lazily after pygame.init)
-_LEVEL_UP_FONT = None
+
 
 
 # ═════════════════════════════════════════════════════════════════════════
@@ -140,7 +139,7 @@ def draw_divine_power_screen(screen, font, font_lg,
         key = perk["key"]
         level = save_data["perk_levels"].get(key, 0)
         max_lv = perk["max"]
-        cost = config.perk_cost(level)
+        cost = config.perk_cost(level, perk.get("cost_scale", 1.0))
         can_afford = save_data["dp"] >= cost and level < max_lv
         is_selected = (i == selected_index)
 
@@ -169,7 +168,7 @@ def draw_divine_power_screen(screen, font, font_lg,
         pygame.draw.rect(screen, (60, 60, 60),
                          (bar_x, bar_y, bar_w, bar_h))
         if fill_pct > 0:
-            pygame.draw.rect(screen, config.XP_BAR_BLUE,
+            pygame.draw.rect(screen, config.BAR_BLUE,
                              (bar_x, bar_y,
                               int(bar_w * fill_pct), bar_h))
         if max_lv >= config.NO_MAX:
@@ -316,11 +315,13 @@ def _render_fit(text, max_width, base_size=28, min_size=10):
 
 
 def draw_hud(screen, font, player, wave_manager, kills,
-             equip_notification="", notif_timer=0,
-             level_up_timer=0, time_scale=1.0):
-    """Render HUD with HP/XP bars, stats panel, and action buttons.
+             gold=0, dp_earned=0, equip_notification="", notif_timer=0,
+             time_scale=1.0, show_upgrade=False, upgrade_tab=0,
+             gold_upgrades=None):
+    """Render HUD with HP bar, gold display, stats panel, and action buttons.
 
-    Returns dict of clickable button rects: {"exit": rect, "speed": rect}.
+    When *show_upgrade* is True, embeds the upgrade panel at the bottom.
+    Returns dict of clickable button rects.
     """
     bar_w, bar_h = 260, 24
     bx, by = 12, 12
@@ -340,50 +341,24 @@ def draw_hud(screen, font, player, wave_manager, kills,
         midleft=(bx + 4, by + bar_h // 2))
     screen.blit(hp_l, hp_l_rect)
 
-    # XP bar
-    xp_y = by + bar_h + 20
-    needed = player._xp_for_level(player.level)
-    xp_ratio = player.xp / needed if needed > 0 else 0
-    pygame.draw.rect(screen, config.GREY, (bx, xp_y, bar_w, bar_h))
-    if xp_ratio > 0:
-        pygame.draw.rect(screen, config.XP_BAR_BLUE,
-                         (bx, xp_y, int(bar_w * xp_ratio), bar_h))
-    xp_text = L.t("hud_xp", player.level, int(player.xp), needed)
-    xp_l = _render_fit(xp_text, inner_w)
-    xp_l_rect = xp_l.get_rect(
-        midleft=(bx + 4, xp_y + bar_h // 2))
-    screen.blit(xp_l, xp_l_rect)
+    # Gold display (below HP bar)
+    gold_y = by + bar_h + 10
+    gold_text = L.t("hud_gold", gold)
+    gold_surf = font.render(gold_text, True, config.GOLD)
+    screen.blit(gold_surf, (bx, gold_y))
 
-    # Stats panel (right side)
+    # DP display (below gold)
+    dp_text = L.t("hud_dp", dp_earned)
+    dp_surf = font.render(dp_text, True, config.PURPLE)
+    screen.blit(dp_surf, (bx, gold_y + 26))
+
+    # Top-right: Wave, Kills, Bullets
     sx = config.SCREEN_WIDTH - 210
     sy = 10
-    stats = [
-        L.t("hud_wave", wave_manager.wave_number),
-        L.t("hud_kills", kills),
-        "",
-        L.t("hud_atk", int(player.attack_damage)),
-        L.t("hud_cd", L.fmt(player.attack_cooldown)),
-        L.t("hud_crit", int(player.crit_rate * 100)),
-        L.t("hud_cdmg", int(player.crit_damage * 100)),
-        L.t("hud_pierce", player.piercing),
-        L.t("hud_range", int(player.attack_range)),
-        L.t("hud_def", player.defense),
-        L.t("hud_ls", int(player.lifesteal * 100)),
-        L.t("hud_regen", L.fmt(player.hp_regen)),
-        L.t("hud_bcount", player.bullet_count),
-        L.t("hud_speed", L.fmt(time_scale)),
-    ]
-    for s in stats:
-        if s == "":
-            sy += 4
-            continue
-        c = config.WHITE
-        for prefix in ("Wave", "Kills", "波数", "击杀"
-                        ):
-            if s.startswith(prefix):
-                c = config.GREY
-                break
-        surf = font.render(s, True, c)
+    for text in (L.t("hud_wave", wave_manager.wave_number),
+                 L.t("hud_kills", kills),
+                 L.t("hud_bcount", player.bullet_count)):
+        surf = font.render(text, True, config.GREY)
         screen.blit(surf, (sx, sy))
         sy += 22
 
@@ -410,6 +385,16 @@ def draw_hud(screen, font, player, wave_manager, kills,
     screen.blit(speed_surf, speed_rect)
     buttons["speed"] = speed_rect.inflate(12, 6)
 
+    # Upgrade button (next to speed)
+    upg_text = L.t("hud_upgrade")
+    upg_surf = font.render(upg_text, True, config.YELLOW)
+    upg_rect = upg_surf.get_rect(
+        bottomleft=(speed_rect.right + 20, config.SCREEN_HEIGHT - 8))
+    pygame.draw.rect(screen, (50, 50, 50),
+                     upg_rect.inflate(12, 6), border_radius=4)
+    screen.blit(upg_surf, upg_rect)
+    buttons["upgrade"] = upg_rect.inflate(12, 6)
+
     # Equipment drop notification
     if equip_notification and notif_timer > 0:
         n = font.render(equip_notification, True, config.ORANGE)
@@ -417,16 +402,98 @@ def draw_hud(screen, font, player, wave_manager, kills,
         ny = config.SCREEN_HEIGHT - 50
         screen.blit(n, (nx, ny))
 
-    # Level-up flash
-    if level_up_timer > 0:
-        global _LEVEL_UP_FONT
-        if _LEVEL_UP_FONT is None:
-            _LEVEL_UP_FONT = L.create_font(56)
-        lvl = _LEVEL_UP_FONT.render(L.t("hud_level_up"), True,
-                                    config.YELLOW)
-        lx = config.SCREEN_WIDTH // 2 - lvl.get_width() // 2
-        ly = config.SCREEN_HEIGHT // 2 - 60
-        screen.blit(lvl, (lx, ly))
+    # ── Embedded upgrade panel ─────────────────────────────────────
+    if show_upgrade:
+        if gold_upgrades is None:
+            gold_upgrades = {}
+        font_sm = L.create_font(18)
+        panel = pygame.Rect(80, 375, 640, 210)
+        # backdrop
+        backdrop = pygame.Surface((panel.width, panel.height))
+        backdrop.set_alpha(200)
+        backdrop.fill((20, 20, 30))
+        screen.blit(backdrop, panel)
+        pygame.draw.rect(screen, (80, 80, 80), panel, width=1,
+                         border_radius=4)
+
+        # ── Tab row ────────────────────────────────────────────────
+        tab_keys = config.UPGRADE_TABS
+        tab_w = (panel.width - 60) // 3
+        tab_h = 26
+        tab_y = panel.y + 6
+        for i, tcfg in enumerate(tab_keys):
+            tx = panel.x + 10 + i * (tab_w + 10)
+            selected = i == upgrade_tab
+            bg = (55, 55, 65) if selected else (40, 40, 40)
+            tr = pygame.Rect(tx, tab_y, tab_w, tab_h)
+            pygame.draw.rect(screen, bg, tr, border_radius=3)
+            if selected:
+                pygame.draw.rect(screen, config.GOLD, tr, width=1,
+                                 border_radius=3)
+            ts = font.render(L.t(tcfg["label_key"]), True,
+                             config.GOLD if selected else config.GREY)
+            screen.blit(ts, ts.get_rect(center=tr.center))
+            buttons[f"tab_{i}"] = tr
+
+        # Gold in top-right of panel
+        gs = font_sm.render(L.t("hud_gold", gold), True, config.GOLD)
+        screen.blit(gs, (panel.right - gs.get_width() - 10, tab_y + 2))
+
+        # ── Upgrade buttons ───────────────────────────────────────
+        tab_upgrades = tab_keys[upgrade_tab]["upgrades"]
+        cols = 3 if len(tab_upgrades) > 4 else 2
+        btn_w = (panel.width - 30 - (cols - 1) * 8) // cols
+        btn_h = 50
+        row0 = tab_y + tab_h + 8
+        row_gap = 6
+
+        def _val_str(key, raw):
+            if key in ("crit_rate", "lifesteal"):
+                return f"{int(raw*100)}%"
+            if key == "crit_damage":
+                return f"{int(raw*100)}%"
+            if key == "dp_bonus":
+                return f"+{int(raw*100)}%"
+            if key == "gold_modifier":
+                return f"+{int((raw-1)*100)}%"
+            if key == "attack_cooldown":
+                return f"{L.fmt(raw)}s"
+            if isinstance(raw, float):
+                return L.fmt(raw)
+            return str(int(raw))
+
+        for idx, key in enumerate(tab_upgrades):
+            row = idx // cols
+            col = idx % cols
+            cfg = next(g for g in config.GOLD_UPGRADES
+                       if g["key"] == key)
+            level = gold_upgrades.get(key, 0)
+            cost = int(cfg["base_cost"] * (cfg["cost_scale"] ** level))
+            can_afford = gold >= cost
+
+            bx = panel.x + 15 + col * (btn_w + 8)
+            by = row0 + row * (btn_h + row_gap)
+            br = pygame.Rect(bx, by, btn_w, btn_h)
+            bg = (50, 60, 50) if can_afford else (40, 40, 40)
+            pygame.draw.rect(screen, bg, br, border_radius=3)
+            if can_afford:
+                pygame.draw.rect(screen, config.DARK_GOLD, br,
+                                 width=1, border_radius=3)
+
+            nk = f"upg_{key}"
+            ns = font_sm.render(L.t(nk), True, config.WHITE)
+            screen.blit(ns, (bx + 6, by + 3))
+            cs = font_sm.render(L.t("upg_buy", cost), True,
+                                config.GOLD if can_afford
+                                else config.GREY)
+            screen.blit(cs, (bx + btn_w - cs.get_width() - 6, by + 3))
+
+            raw = getattr(player, key)
+            vs = font_sm.render(_val_str(key, raw), True, config.YELLOW)
+            screen.blit(vs, (bx + 6, by + 26))
+
+            buttons[f"buy_{key}"] = br
+
     return buttons
 
 
@@ -434,23 +501,22 @@ def draw_hud(screen, font, player, wave_manager, kills,
 #  Game Over screen  (returns clickable rect)
 # ═════════════════════════════════════════════════════════════════════════
 
-def draw_game_over(screen, font, wave_manager,
+def draw_game_over(screen, font, kills=0,
                    dp_earned=0) -> dict:
-    """Render game-over / settlement screen.  Returns {'continue': rect}."""
+    """Render settlement screen.  Returns {'continue': rect}."""
     lines = [
         (L.t("go_title"), config.RED),
-        (L.t("go_wave", wave_manager.wave_number), config.WHITE),
-        (L.t("go_killed", wave_manager.enemies_killed), config.WHITE),
+        (L.t("go_killed", kills), config.WHITE),
     ]
     if dp_earned > 0:
         lines.append((L.t("go_dp", dp_earned), config.GOLD))
 
-    y = 180
+    y = 200
     for text, colour in lines:
         r = font.render(text, True, colour)
         screen.blit(r,
                     (config.SCREEN_WIDTH // 2 - r.get_width() // 2, y))
-        y += 48
+        y += 55
 
     y += 10
     btn = pygame.Rect(0, 0, 260, 40)

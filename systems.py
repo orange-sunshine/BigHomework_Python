@@ -1,20 +1,9 @@
-"""Game systems: Divine Power, equipment generation, wave management."""
+"""Game systems: permanent bonuses, equipment generation, wave management."""
 
 import random
 
 import config
 from entities import Enemy, EquipmentItem
-
-
-# ═════════════════════════════════════════════════════════════════════════
-#  Divine Power helpers
-# ═════════════════════════════════════════════════════════════════════════
-
-def calculate_divine_power(player_level: int, kills: int,
-                           wave_number: int, dp_bonus: float = 0) -> int:
-    """Return DP earned, scaled by dp_bonus multiplier."""
-    base = player_level * wave_number / 5 + kills / 10
-    return int(base * (1 + dp_bonus))
 
 
 def apply_permanent_bonuses(player, save_data: dict):
@@ -144,8 +133,7 @@ class WaveManager:
         enemy.hp = int(config.ENEMY_BASE_HP * (1 + w * config.WAVE_HP_SCALE))
         enemy.speed = config.ENEMY_BASE_SPEED * (1 + w * config.WAVE_SPEED_SCALE)
         enemy.damage = config.ENEMY_BASE_DAMAGE * (1 + w * config.WAVE_DAMAGE_SCALE)
-        enemy.xp_value = int(config.ENEMY_BASE_XP_VALUE *
-                             (1 + w * config.WAVE_XP_SCALE))
+        enemy.gold_value = int(config.GOLD_BASE * (1 + w * config.GOLD_WAVE_SCALE))
         enemy.attack_cooldown = max(0.4, 2.0 - w * 0.08)
         enemy.attack_range = config.ENEMY_ATTACK_RANGE + w * 5
 

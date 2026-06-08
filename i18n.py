@@ -38,7 +38,8 @@ _T = {
     "equip_back":          ("[ESC]  Back", "[ESC] 返回"),
     # ── HUD ──────────────────────────────────────────────────────────────
     "hud_hp":              ("HP {}/{}", "生命 {}/{}"),
-    "hud_xp":              ("Lv.{}  XP {}/{}", "等级 {}  经验 {}/{}"),
+    "hud_gold":            ("Gold: {}", "金币: {}"),
+    "hud_dp":              ("Divine Power: {}", "神力: {}"),
     "hud_wave":            ("Wave {}", "波数 {}"),
     "hud_kills":           ("Kills {}", "击杀 {}"),
     "hud_atk":             ("ATK  {}", "攻击 {}"),
@@ -51,19 +52,41 @@ _T = {
     "hud_ls":              ("LS    {}%", "吸血 {}%"),
     "hud_regen":           ("Regen {}", "恢复 {}"),
     "hud_bcount":          ("Bullets {}", "子弹 {}"),
-    "hud_level_up":        ("LEVEL UP!", "升级！"),
     "hud_speed":           ("Speed {}x", "倍速 {}x"),
     "hud_exit":            ("[M] Results", "[M] 结算"),
     "hud_speed_btn":       ("[TAB] {}", "[TAB] {}"),
+    "hud_upgrade":         ("[U] Upgrade", "[U] 升级"),
     # ── Game Over ────────────────────────────────────────────────────────
-    "go_title":            ("GAME OVER", "游戏结束"),
-    "go_score":            ("Score: {}", "得分: {}"),
-    "go_wave":             ("Wave reached: {}", "到达波数: {}"),
-    "go_killed":           ("Enemies killed: {}", "击杀敌人: {}"),
-    "go_dp":               ("Divine Power earned: +{}", "获得神力: +{}"),
+    "go_title":            ("SETTLEMENT", "结算"),
+    "go_killed":           ("Kills: {}", "击杀: {}"),
+    "go_dp":               ("Divine Power: +{}", "神力: +{}"),
     "go_continue":         ("Continue [ENTER]", "继续 [回车]"),
     # ── Equipment notification ──────────────────────────────────────────
     "equip_drop":          ("!! {} {} !!", "!! {} {} !!"),
+    # ── Upgrade screen ───────────────────────────────────────────────────
+    "upg_title":           ("Upgrade", "升级"),
+    "upg_lv":              ("Lv.{}", "等级 {}"),
+    "upg_buy":             ("Buy {}g", "购买 {}金币"),
+    "upg_maxed":           ("MAX", "已达上限"),
+    "upg_nofunds":         ("Not enough gold!", "金币不足！"),
+    "upg_bought":          ("{} Lv.{}", "{} 等级 {}"),
+    "upg_close":           ("[ESC]  Close", "[ESC] 关闭"),
+    # ── Upgrade tab labels ───────────────────────────────────────────────
+    "upg_tab_attack":      ("Attack", "攻击"),
+    "upg_tab_defense":     ("Defense", "防御"),
+    "upg_tab_economy":     ("Economy", "经济"),
+    # ── Upgrade stat labels ──────────────────────────────────────────────
+    "upg_attack_damage":   ("Attack", "攻击力"),
+    "upg_max_hp":          ("HP", "生命值"),
+    "upg_defense":         ("Defense", "防御力"),
+    "upg_lifesteal":       ("Lifesteal", "吸血"),
+    "upg_hp_regen":        ("Regen", "生命恢复"),
+    "upg_crit_rate":       ("Crit Rate", "暴击率"),
+    "upg_crit_damage":     ("Crit Dmg", "暴击伤害"),
+    "upg_attack_cooldown": ("Speed", "攻击速度"),
+    "upg_piercing":        ("Pierce", "穿透"),
+    "upg_gold_modifier":   ("Gold", "金币加成"),
+    "upg_dp_bonus":        ("DP Boost", "神力加成"),
     # ── Slot names ──────────────────────────────────────────────────────
     "slot_weapon":         ("Weapon", "武器"),
     "slot_armor":          ("Armor", "护甲"),
@@ -90,14 +113,14 @@ _AFFIX_NAMES = {
     "Regen":   ("Regen",    "恢复"),
     "CritRt":  ("Crit Rt",  "暴击率"),
     "CritDmg": ("Crit Dmg", "暴伤"),
-    "XP":      ("XP",       "经验"),
+    "Gold":    ("Gold",     "金币"),
     "Range":   ("Range",    "范围"),
 }
 
 # ── Perk names & descriptions ──────────────────────────────────────────
 
 _PERK_NAMES = {
-    "xp_modifier":     ("XP Boost", "经验加成"),
+    "gold_modifier":   ("Gold Boost", "金币加成"),
     "attack_damage":   ("Attack", "攻击力"),
     "max_hp":          ("HP", "生命值"),
     "defense":         ("Defense", "防御力"),
@@ -109,23 +132,23 @@ _PERK_NAMES = {
     "attack_cooldown": ("Speed", "攻击速度"),
     "piercing":        ("Pierce", "穿透"),
     "game_speed":      ("Game Speed", "游戏速度"),
-    "dp_bonus":        ("DP Boost", "神力获取加成"),
+    "dp_bonus":        ("DP Boost", "神力加成"),
 }
 
 _PERK_DESCS = {
-    "xp_modifier":     ("+10% XP", "+10% 经验"),
-    "attack_damage":   ("+8% damage", "+8% 伤害"),
-    "max_hp":          ("+5% max HP", "+5% 最大生命"),
-    "defense":         ("+8% defense", "+8% 防御"),
-    "lifesteal":       ("+1% lifesteal", "+1% 吸血"),
-    "hp_regen":        ("+0.5 HP/sec", "+0.5 生命/秒"),
+    "gold_modifier":   ("+5% gold", "+5% 金币"),
+    "attack_damage":   ("+2% damage", "+2% 伤害"),
+    "max_hp":          ("+2% max HP", "+2% 最大生命"),
+    "defense":         ("+2% defense", "+2% 防御"),
+    "lifesteal":       ("+0.2% lifesteal", "+0.2% 吸血"),
+    "hp_regen":        ("+0.1 HP/sec", "+0.1 生命/秒"),
     "bullet_count":    ("+1 bullet", "+1 子弹"),
-    "crit_rate":       ("+2% crit rate", "+2% 暴击率"),
-    "crit_damage":     ("+10% crit dmg", "+10% 暴击伤害"),
-    "attack_cooldown": ("-3% cooldown", "-3% 冷却"),
-    "piercing":        ("+1 pierce, less dmg loss", "+1 穿透, 减少伤害衰减"),
-    "game_speed":      ("+0.5x max speed", "+0.5 最高倍速"),
-    "dp_bonus":        ("+15% DP earned", "+15% 神力获取"),
+    "crit_rate":       ("+0.5% crit rate", "+0.5% 暴击率"),
+    "crit_damage":     ("+3% crit dmg", "+3% 暴击伤害"),
+    "attack_cooldown": ("-1% cooldown", "-1% 冷却"),
+    "piercing":        ("+1 pierce", "+1 穿透"),
+    "game_speed":      ("+1 max speed tier", "+1 最高倍速"),
+    "dp_bonus":        ("+5% DP earned", "+5% 神力获取"),
 }
 
 

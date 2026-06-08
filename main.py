@@ -1,7 +1,7 @@
 """Entry point — stationary turret survivor with DP / Equipment.
 
 Player stays in the centre of the screen and auto-attacks.
-Level-ups give automatic stat boosts (no 3-choice screen).
+Kills drop gold for in-run upgrades and DP for permanent progression.
 """
 
 import math
@@ -14,7 +14,6 @@ import i18n
 import save_manager
 from entities import Player, Enemy, Bullet, EquipmentItem
 from systems import (WaveManager,
-                     calculate_divine_power,
                      apply_permanent_bonuses,
                      generate_equipment, should_drop_equipment)
 from ui import (draw_menu, draw_hud,
@@ -47,16 +46,20 @@ def run_game():
     enemy_bullets: list[Bullet] = []
     wave_manager = WaveManager()
     kills = 0
+    gold = 0
+    gold_upgrades: dict = {}
     dp_earned_this_run = 0
-    max_level_reached = 1
     equip_notification = ""
     notif_timer = 0.0
-    level_up_timer = 0.0
 
     # Divine Power screen state
     dp_selected_index = 0
     dp_notification = ""
     dp_scroll_offset = 0
+
+    # Upgrade panel
+    show_upgrade_panel = False
+    upgrade_tab = 0
 
     # Speed system
     SPEED_TIERS = [1.0, 1.5, 2.0, 3.0, 4.0, 5.0]
@@ -83,9 +86,10 @@ def run_game():
 
                     # MENU actions
                     if state == MENU and action == "start":
-                        (kills, dp_earned_this_run, max_level_reached,
-                         equip_notification, notif_timer,
-                         level_up_timer, time_scale,
+                        gold_upgrades = {g["key"]: 0
+                                         for g in config.GOLD_UPGRADES}
+                        (kills, gold, dp_earned_this_run,
+                         equip_notification, notif_timer, time_scale,
                          speed_idx) = _start_new_run(
                              player, enemies, bullets, enemy_bullets,
                              wave_manager, save_data)
@@ -108,24 +112,38 @@ def run_game():
                     elif state == GAME_OVER and action == "continue":
                         save_manager.add_divine_power(dp_earned_this_run)
                         save_data = save_manager.load_data()
-                        (kills, dp_earned_this_run, max_level_reached,
-                         equip_notification, notif_timer,
-                         level_up_timer, time_scale,
+                        (kills, gold, dp_earned_this_run,
+                         equip_notification, notif_timer, time_scale,
                          speed_idx) = _reset_run_state()
                         state = MENU
 
                     # PLAYING → settlement (awards DP like death)
                     elif state == PLAYING and action == "exit":
-                        dp_earned_this_run = calculate_divine_power(
-                            max_level_reached, kills,
-                            wave_manager.wave_number,
-                            player.dp_bonus)
                         state = GAME_OVER
                     elif state == PLAYING and action == "speed":
                         max_i = min(player.game_speed,
                                     len(SPEED_TIERS) - 1)
                         speed_idx = (speed_idx + 1) % (max_i + 1)
                         time_scale = SPEED_TIERS[speed_idx]
+
+                    elif state == PLAYING and action == "upgrade":
+                        show_upgrade_panel = not show_upgrade_panel
+                    elif state == PLAYING and action.startswith("tab_"):
+                        upgrade_tab = int(action[4:])
+                    elif state == PLAYING and action.startswith("buy_"):
+                        key = action[4:]
+                        for cfg in config.GOLD_UPGRADES:
+                            if cfg["key"] == key:
+                                level = gold_upgrades.get(key, 0)
+                                cost = int(cfg["base_cost"]
+                                           * (cfg["cost_scale"] ** level))
+                                if gold >= cost:
+                                    gold -= cost
+                                    gold_upgrades[key] = level + 1
+                                    old_val = getattr(player, key)
+                                    setattr(player, key,
+                                            old_val + cfg["per_level"])
+                                break
 
                     # EQUIPMENT
                     elif state == EQUIPMENT and action == "back":
@@ -167,9 +185,10 @@ def run_game():
                 # MENU
                 if state == MENU:
                     if event.key == pygame.K_RETURN:
-                        (kills, dp_earned_this_run, max_level_reached,
-                         equip_notification, notif_timer,
-                         level_up_timer, time_scale,
+                        gold_upgrades = {g["key"]: 0
+                                         for g in config.GOLD_UPGRADES}
+                        (kills, gold, dp_earned_this_run,
+                         equip_notification, notif_timer, time_scale,
                          speed_idx) = _start_new_run(
                              player, enemies, bullets, enemy_bullets,
                              wave_manager, save_data)
@@ -188,9 +207,8 @@ def run_game():
                 elif state == GAME_OVER and event.key == pygame.K_RETURN:
                     save_manager.add_divine_power(dp_earned_this_run)
                     save_data = save_manager.load_data()
-                    (kills, dp_earned_this_run, max_level_reached,
-                     equip_notification, notif_timer,
-                     level_up_timer, time_scale,
+                    (kills, gold, dp_earned_this_run,
+                     equip_notification, notif_timer, time_scale,
                      speed_idx) = _reset_run_state()
                     state = MENU
 
@@ -219,11 +237,11 @@ def run_game():
                 # PLAYING
                 elif state == PLAYING:
                     if event.key == pygame.K_m:
-                        dp_earned_this_run = calculate_divine_power(
-                            max_level_reached, kills,
-                            wave_manager.wave_number,
-                            player.dp_bonus)
                         state = GAME_OVER
+                    elif event.key == pygame.K_u:
+                        show_upgrade_panel = not show_upgrade_panel
+                    elif event.key == pygame.K_ESCAPE:
+                        show_upgrade_panel = False
                     elif event.key == pygame.K_TAB:
                         max_i = min(player.game_speed,
                                     len(SPEED_TIERS) - 1)
@@ -301,13 +319,14 @@ def run_game():
                         enemies.remove(enemy)
                         kills += 1
                         wave_manager.on_enemy_killed()
-                        # XP goes directly to player
-                        levelled = player.gain_xp(enemy.xp_value)
-                        max_level_reached = max(max_level_reached,
-                                                player.level)
-                        if levelled:
-                            player.on_level_up()
-                            level_up_timer = 1.5
+                        # Gold + DP drop
+                        gold_base = enemy.gold_value
+                        gold_pre = gold_base * player.gold_modifier
+                        gold += int(gold_pre + 0.5)
+                        dp_from_kill = max(1, int(
+                            gold_base * config.DP_DROP_RATIO
+                            * (1 + player.dp_bonus) + 0.5))
+                        dp_earned_this_run += dp_from_kill
 
                         if should_drop_equipment(wave_manager.wave_number):
                             msg = _try_equip_drop(save_data, wave_manager)
@@ -336,13 +355,9 @@ def run_game():
             # Timers
             if notif_timer > 0:
                 notif_timer -= dt
-            if level_up_timer > 0:
-                level_up_timer -= dt
 
             # Player death
             if player.hp <= 0:
-                dp_earned_this_run = calculate_divine_power(
-                    max_level_reached, kills, wave_manager.wave_number)
                 state = GAME_OVER
 
         # ── Draw ────────────────────────────────────────────────────────
@@ -360,13 +375,16 @@ def run_game():
                 enemy.draw(screen)
             player.draw(screen)
             click_buttons = draw_hud(screen, font, player, wave_manager,
-                                     kills, equip_notification,
-                                     notif_timer, level_up_timer,
-                                     time_scale)
+                                     kills, gold, dp_earned_this_run,
+                                     equip_notification,
+                                     notif_timer, time_scale,
+                                     show_upgrade_panel, upgrade_tab,
+                                     gold_upgrades)
 
         elif state == GAME_OVER:
             click_buttons = draw_game_over(screen, font,
-                                           wave_manager, dp_earned_this_run)
+                                           wave_manager.enemies_killed,
+                                           dp_earned_this_run)
 
         elif state == DIVINE_POWER:
             click_buttons = draw_divine_power_screen(
@@ -390,9 +408,8 @@ def _start_new_run(player, enemies, bullets, enemy_bullets,
                    wave_manager, save_data):
     """Reset per-run state and apply permanent bonuses.
 
-    Returns tuple of initial (kills, dp_earned_this_run,
-    max_level_reached, equip_notification, notif_timer, level_up_timer,
-    time_scale, speed_idx).
+    Returns tuple of initial (kills, gold, dp_earned_this_run,
+    equip_notification, notif_timer, time_scale, speed_idx).
     """
     player.__init__()
     apply_permanent_bonuses(player, save_data)
@@ -400,12 +417,12 @@ def _start_new_run(player, enemies, bullets, enemy_bullets,
     bullets.clear()
     enemy_bullets.clear()
     wave_manager.__init__()
-    return (0, 0, 1, "", 0.0, 0.0, 1.0, 0)
+    return (0, 0, 0, "", 0.0, 1.0, 0)
 
 
 def _reset_run_state():
     """Return clean initial values for per-run tracking variables."""
-    return (0, 0, 1, "", 0.0, 0.0, 1.0, 0)
+    return (0, 0, 0, "", 0.0, 1.0, 0)
 
 
 def _buy_dp_perk(save_data: dict, selected_index: int) -> str:
@@ -418,7 +435,7 @@ def _buy_dp_perk(save_data: dict, selected_index: int) -> str:
     level = save_data.get("perk_levels", {}).get(key, 0)
     if level >= perk["max"]:
         return i18n.L.t("dp_maxed")
-    cost = config.perk_cost(level)
+    cost = config.perk_cost(level, perk.get("cost_scale", 1.0))
     if save_data["dp"] < cost:
         return i18n.L.t("dp_nofunds")
     save_data["dp"] -= cost

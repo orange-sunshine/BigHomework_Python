@@ -22,7 +22,7 @@ GREY = (100, 100, 100)
 DARK_GREY = (40, 40, 40)
 HP_BAR_GREEN = (50, 200, 50)
 HP_BAR_RED = (200, 50, 50)
-XP_BAR_BLUE = (50, 100, 255)
+BAR_BLUE = (50, 100, 255)
 
 # ── Player ───────────────────────────────────────────────────────────────
 PLAYER_SIZE = 24
@@ -31,16 +31,6 @@ PLAYER_START_HP = 100
 PLAYER_ATTACK_COOLDOWN = 0.3
 PLAYER_ATTACK_DAMAGE = 15
 PLAYER_ATTACK_RANGE = 350
-PLAYER_START_XP = 0
-PLAYER_START_LEVEL = 1
-
-XP_BASE_REQUIREMENT = 50
-XP_SCALE_FACTOR = 1.5
-
-# ── Auto level-up bonuses ────────────────────────────────────────────────
-LEVEL_UP_HP_BONUS = 5
-LEVEL_UP_DMG_BONUS = 2
-LEVEL_UP_DEF_BONUS = 1
 
 # ── New stats: defaults ─────────────────────────────────────────────────
 PLAYER_DEFENSE = 0
@@ -55,13 +45,17 @@ PENETRATION_RATE = 0.70
 
 # ── Enemy ────────────────────────────────────────────────────────────────
 ENEMY_SIZE = 20
-ENEMY_BASE_HP = 30
-ENEMY_BASE_SPEED = 80
-ENEMY_BASE_DAMAGE = 10
-ENEMY_BASE_XP_VALUE = 10
+ENEMY_BASE_HP = 15
+ENEMY_BASE_SPEED = 40
+ENEMY_BASE_DAMAGE = 5
 ENEMY_SPAWN_MARGIN = 50
 ENEMY_ATTACK_RANGE = 100
 ENEMY_BULLET_SPEED = 220
+
+# ── Drops ────────────────────────────────────────────────────────────────
+GOLD_BASE = 5
+GOLD_WAVE_SCALE = 1.0
+DP_DROP_RATIO = 0.5
 
 # ── Bullet ───────────────────────────────────────────────────────────────
 BULLET_SPEED = 500
@@ -75,35 +69,39 @@ WAVE_ENEMY_INCREMENT = 5
 WAVE_HP_SCALE = 0.20
 WAVE_SPEED_SCALE = 0.06
 WAVE_DAMAGE_SCALE = 0.12
-WAVE_XP_SCALE = 0.12
 
 # ── Divine Power ─────────────────────────────────────────────────────────
 DP_VISIBLE_ROWS = 7
 NO_MAX = 9999
 
 DIVINE_PERKS = [
-    {"key": "xp_modifier",     "max": NO_MAX, "per_level": 0.10, "type": "add"},
-    {"key": "attack_damage",   "max": NO_MAX, "per_level": 1.08, "type": "mult"},
-    {"key": "max_hp",          "max": NO_MAX, "per_level": 1.05, "type": "mult"},
-    {"key": "defense",         "max": NO_MAX, "per_level": 1.08, "type": "mult"},
-    {"key": "lifesteal",       "max": NO_MAX, "per_level": 0.01, "type": "add"},
-    {"key": "hp_regen",        "max": NO_MAX, "per_level": 0.5,  "type": "add"},
-    {"key": "bullet_count",    "max": 50, "per_level": 1,    "type": "add"},
-    {"key": "crit_rate",       "max": 50,     "per_level": 0.02, "type": "add"},
-    {"key": "crit_damage",     "max": NO_MAX, "per_level": 0.10, "type": "add"},
-    {"key": "attack_cooldown", "max": NO_MAX, "per_level": 0.97, "type": "mult"},
-    {"key": "piercing",        "max": NO_MAX, "per_level": 1,    "type": "add"},
-    {"key": "game_speed",      "max": 5,      "per_level": 1,    "type": "add"},
-    {"key": "dp_bonus",        "max": NO_MAX, "per_level": 0.15, "type": "add"},
+    {"key": "gold_modifier",   "max": NO_MAX, "per_level": 0.05, "type": "add",  "cost_scale": 1.0},
+    {"key": "attack_damage",   "max": NO_MAX, "per_level": 1.02, "type": "mult", "cost_scale": 1.0},
+    {"key": "max_hp",          "max": NO_MAX, "per_level": 1.02, "type": "mult", "cost_scale": 1.0},
+    {"key": "defense",         "max": NO_MAX, "per_level": 1.02, "type": "mult", "cost_scale": 1.0},
+    {"key": "lifesteal",       "max": NO_MAX, "per_level": 0.002,"type": "add",  "cost_scale": 1.0},
+    {"key": "hp_regen",        "max": NO_MAX, "per_level": 0.1,  "type": "add",  "cost_scale": 1.0},
+    {"key": "bullet_count",    "max": 50,     "per_level": 1,    "type": "add",  "cost_scale": 8.0},
+    {"key": "crit_rate",       "max": 50,     "per_level": 0.005,"type": "add",  "cost_scale": 2.5},
+    {"key": "crit_damage",     "max": NO_MAX, "per_level": 0.03, "type": "add",  "cost_scale": 1.0},
+    {"key": "attack_cooldown", "max": NO_MAX, "per_level": 0.99, "type": "mult", "cost_scale": 1.0},
+    {"key": "piercing",        "max": NO_MAX, "per_level": 1,    "type": "add",  "cost_scale": 1.0},
+    {"key": "game_speed",      "max": 5,      "per_level": 1,    "type": "add",  "cost_scale": 30.0},
+    {"key": "dp_bonus",        "max": NO_MAX, "per_level": 0.05, "type": "add",  "cost_scale": 1.0},
 ]
 
-def perk_cost(level: int) -> int:
-    """Divine Power cost to upgrade a perk from *level* to *level* + 1."""
-    return int(10 * (level + 1) ** 1.4)
+def perk_cost(level: int, cost_scale: float = 1.0) -> int:
+    """Divine Power cost to upgrade a perk from *level* to *level* + 1.
+
+    Normal perks (cost_scale=1.0) grow slowly via a power function.
+    Special perks (cost_scale>1.0) cost proportionally more at every level.
+    """
+    base = int(5 * (level + 1) ** 1.3)
+    return int(base * cost_scale)
 
 # ── Equipment ────────────────────────────────────────────────────────────
-EQUIP_DROP_BASE_CHANCE = 0.04
-EQUIP_DROP_WAVE_BONUS = 0.005
+EQUIP_DROP_BASE_CHANCE = 0.008
+EQUIP_DROP_WAVE_BONUS = 0.001
 
 EQUIP_SLOTS = ["weapon", "armor", "accessory"]
 EQUIP_RARITIES = ["white", "blue", "purple", "orange", "red"]
@@ -119,6 +117,30 @@ EQUIP_AFFIXES = [
     {"name": "Regen",  "attr": "hp_regen",        "per_tier": [0.5, 1, 2, 4, 7]},
     {"name": "CritRt", "attr": "crit_rate",       "per_tier": [0.02, 0.05, 0.09, 0.14, 0.20]},
     {"name": "CritDmg","attr": "crit_damage",     "per_tier": [0.05, 0.12, 0.22, 0.35, 0.50]},
-    {"name": "XP",     "attr": "xp_modifier",     "per_tier": [0.05, 0.10, 0.20, 0.35, 0.50]},
+    {"name": "Gold",   "attr": "gold_modifier",   "per_tier": [0.05, 0.10, 0.20, 0.35, 0.50]},
     {"name": "Range",  "attr": "attack_range",    "per_tier": [20, 45, 80, 130, 200]},
+]
+
+# ── Upgrade panel tab groups ────────────────────────────────────────────
+
+UPGRADE_TABS = [
+    {"key": "attack",  "label_key": "upg_tab_attack",  "upgrades": ["attack_damage", "crit_rate", "crit_damage", "attack_cooldown", "piercing"]},
+    {"key": "defense", "label_key": "upg_tab_defense", "upgrades": ["max_hp", "defense", "lifesteal", "hp_regen"]},
+    {"key": "economy", "label_key": "upg_tab_economy", "upgrades": ["gold_modifier", "dp_bonus"]},
+]
+
+# ── In-game gold upgrades ────────────────────────────────────────────────
+
+GOLD_UPGRADES = [
+    {"key": "attack_damage",   "per_level": 3,     "base_cost": 10, "cost_scale": 1.5},
+    {"key": "max_hp",          "per_level": 10,    "base_cost": 10, "cost_scale": 1.5},
+    {"key": "defense",         "per_level": 1,     "base_cost": 10, "cost_scale": 1.5},
+    {"key": "lifesteal",       "per_level": 0.003, "base_cost": 15, "cost_scale": 1.6},
+    {"key": "hp_regen",        "per_level": 0.2,   "base_cost": 12, "cost_scale": 1.5},
+    {"key": "crit_rate",       "per_level": 0.01,  "base_cost": 20, "cost_scale": 1.6},
+    {"key": "crit_damage",     "per_level": 0.05,  "base_cost": 15, "cost_scale": 1.5},
+    {"key": "attack_cooldown", "per_level": -0.02, "base_cost": 15, "cost_scale": 1.5},
+    {"key": "piercing",        "per_level": 1,     "base_cost": 25, "cost_scale": 1.7},
+    {"key": "gold_modifier",   "per_level": 0.05,  "base_cost": 15, "cost_scale": 1.6},
+    {"key": "dp_bonus",        "per_level": 0.05,  "base_cost": 20, "cost_scale": 1.6},
 ]

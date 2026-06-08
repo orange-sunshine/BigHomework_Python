@@ -14,7 +14,7 @@ _DEFAULT_DATA = {
     "dp": 0,
     "total_dp_earned": 0,
     "perk_levels": {
-        "xp_modifier": 0, "attack_damage": 0, "max_hp": 0,
+        "gold_modifier": 0, "attack_damage": 0, "max_hp": 0,
         "defense": 0, "lifesteal": 0, "hp_regen": 0, "bullet_count": 0,
         "crit_rate": 0, "crit_damage": 0, "attack_cooldown": 0,
         "piercing": 0, "game_speed": 0, "dp_bonus": 0,
@@ -76,13 +76,24 @@ def _deep_copy(d: dict) -> dict:
 
 
 def _merge_with_defaults(data: dict) -> dict:
-    """Fill missing keys from defaults so corrupted/old files still work."""
-    defaults = _deep_copy(_DEFAULT_DATA)
-    defaults.update(data)
+    """Fill missing keys from defaults, dropping deprecated keys."""
+    merged = _deep_copy(_DEFAULT_DATA)
 
-    # Merge nested dicts
-    for key in ("perk_levels", "equipped"):
-        if isinstance(data.get(key), dict):
-            defaults[key].update(data[key])
+    for k, v in data.items():
+        if k in ("perk_levels", "equipped"):
+            continue
+        merged[k] = v
 
-    return defaults
+    # Merge perk_levels: only keep keys that exist in DEFAULT (drops old ones)
+    if isinstance(data.get("perk_levels"), dict):
+        valid = set(_DEFAULT_DATA["perk_levels"])
+        for k, v in data["perk_levels"].items():
+            if k in valid:
+                merged["perk_levels"][k] = v
+
+    # Merge equipped: keep all present items
+    if isinstance(data.get("equipped"), dict):
+        for k, v in data["equipped"].items():
+            merged["equipped"][k] = v
+
+    return merged
